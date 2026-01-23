@@ -71,22 +71,37 @@ def download_audio(url):
         raise Exception(f"Download failed: {result.stderr}")
 
 def transcribe():
+    # Device detection with debug info
+    print("=" * 50)
+    print("DEVICE DETECTION:")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    print(f"MPS available: {torch.backends.mps.is_available()}")
+    print(f"MPS built: {torch.backends.mps.is_built()}")
+    
+    # WhisperX/faster-whisper doesn't support MPS yet, only CUDA and CPU
     if torch.cuda.is_available():
         device = "cuda"
-        compute_type = "float16"
-    elif torch.backends.mps.is_available():
-        device = "mps"
         compute_type = "float16"
     else:
         device = "cpu"
         compute_type = "int8"
+        print("Note: WhisperX doesn't support MPS (Apple Silicon GPU) yet.")
+        print("Using CPU instead. For GPU acceleration, faster-whisper needs CUDA.")
+    
+    print(f"Selected device: {device}")
+    print(f"Compute type: {compute_type}")
     
     try:
         model = whisperx.load_model("small", device, compute_type=compute_type)
-    except Exception:
+        print(f"Model loaded successfully on device: {device}")
+        print("=" * 50)
+    except Exception as e:
+        print(f"Failed to load on {device}: {e}")
         device = "cpu"
         compute_type = "int8"
         model = whisperx.load_model("small", device, compute_type=compute_type)
+        print(f"Model loaded on fallback device: {device}")
+        print("=" * 50)
     
     audio = whisperx.load_audio(AUDIO_FILE)
     result = model.transcribe(audio, batch_size=24, language="en")

@@ -6,7 +6,7 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 
 - **Automatic Transcription:** Uses OpenAI's Whisper model for accurate speech-to-text conversion
 - **Speaker Detection:** Identifies different speakers and labels them in the transcript
-- **GPU Acceleration:** Automatically detects and uses CUDA (Nvidia) or MPS (Apple Silicon) when available
+- **GPU Acceleration:** Automatically detects and uses CUDA (Nvidia) when available
 - **Interactive Navigation:** Click any timestamp to jump the video to that exact point
 - **Multiple Input Methods:** Process from YouTube URLs or upload local MP3 files
 - **Two-step Alignment:** Uses WhisperX's alignment model for precise timestamps
@@ -16,12 +16,13 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 ⚠️ **Important:** This application runs entirely on your local machine without cloud services.
 
 - **CPU Processing:** Without a GPU, transcription is slow (~10-15 minutes per hour of video)
-- **GPU Support:** GPU acceleration requires a compatible Nvidia GPU. RTX 50-series GPUs require waiting for PyTorch updates
+- **GPU Support:** GPU acceleration requires a compatible Nvidia GPU with CUDA. RTX 50-series GPUs require waiting for PyTorch updates
+- **Apple Silicon (M1/M2/M3):** MPS (Metal Performance Shaders) is not yet supported by WhisperX's backend (faster-whisper/CTranslate2). Your Mac will use CPU processing for now
 - **Memory Usage:** Requires 8GB+ RAM (16GB+ recommended for batch processing optimization)
 - **Model Size:** First run downloads ~500MB of models to `~/.cache/huggingface/`
 - **Audio Quality:** Transcription accuracy depends on audio quality and clarity
 
-**Recommended for:** Videos up to 2-3 hours on CPU, unlimited with a supported GPU
+**Recommended for:** Videos up to 2-3 hours on CPU, unlimited with a supported Nvidia GPU
 
 ## How It Works
 
@@ -90,9 +91,9 @@ cd transcriber
 pip3 install -r requirements.txt
 ```
 
-**MPS Support (Apple Silicon M1/M2/M3):**
+**Note about Apple Silicon (M1/M2/M3):**
 
-MPS is enabled by default on Apple Silicon Macs. No additional installation needed—the app will automatically detect and use your GPU.
+Currently, WhisperX uses faster-whisper as its backend, which doesn't support MPS (Metal Performance Shaders) yet. Your Mac will automatically fall back to CPU processing. MPS support is being developed by the faster-whisper/CTranslate2 teams, but is not available at this time.
 
 ### Linux (Ubuntu/Debian)
 
@@ -144,11 +145,10 @@ streamlit run app.py
 
 ## Performance Notes
 
-- **CUDA (Nvidia GPU):** Fastest processing (~1-2 minutes for 1 hour video) -- torch needs updates for 50 series GPUs
-- **MPS (Apple Silicon):** Fast processing (~2-3 minutes for 1 hour video)
-- **CPU:** Slower (~10-15 minutes for 1 hour video)
+- **CUDA (Nvidia GPU):** Fastest processing (~1-2 minutes for 1 hour video) -- torch needs updates for RTX 50-series GPUs
+- **CPU (Intel/AMD/Apple Silicon):** Slower (~10-15 minutes for 1 hour video)
 
-The app automatically detects and uses the best available device.
+The app automatically detects and uses the best available device. Apple Silicon Macs will use CPU until MPS support is added to faster-whisper.
 
 ## Performance Tuning
 
@@ -178,6 +178,7 @@ You can optimize performance by adjusting the batch size in `app.py`:
 | Out of memory | Reduce batch size in `app.py` or close other applications |
 | Models won't download | Check internet connection. Models cache at `~/.cache/huggingface/` |
 | Slow transcription | Increase batch size in `app.py` if you have RAM available |
+| "unsupported device mps" | This is expected. WhisperX doesn't support MPS yet. App will use CPU automatically |
 
 ---
 
