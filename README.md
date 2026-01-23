@@ -17,7 +17,7 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 
 - **CPU Processing:** Without a GPU, transcription is slow (~10-15 minutes per hour of video)
 - **GPU Support:** GPU acceleration requires a compatible Nvidia GPU with CUDA. RTX 50-series GPUs require waiting for PyTorch updates
-- **Apple Silicon (M1/M2/M3):** MPS (Metal Performance Shaders) is not yet supported by WhisperX's backend (faster-whisper/CTranslate2). Your Mac will use CPU processing for now
+- **Apple Silicon (M1/M2/M3):** MPS (Metal Performance Shaders) is not yet supported by WhisperX's backend (faster-whisper/CTranslate2). Use MLX model for faster processing on Mac.
 - **Memory Usage:** Requires 8GB+ RAM (16GB+ recommended for batch processing optimization)
 - **Model Size:** First run downloads ~500MB of models to `~/.cache/huggingface/`
 - **Audio Quality:** Transcription accuracy depends on audio quality and clarity
