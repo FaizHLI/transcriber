@@ -11,6 +11,18 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 - **Multiple Input Methods:** Process from YouTube URLs or upload local MP3 files
 - **Two-step Alignment:** Uses WhisperX's alignment model for precise timestamps
 
+## Limitations
+
+⚠️ **Important:** This application runs entirely on your local machine without cloud services.
+
+- **CPU Processing:** Without a GPU, transcription is slow (~10-15 minutes per hour of video)
+- **GPU Support:** GPU acceleration requires a compatible Nvidia GPU. RTX 50-series GPUs require waiting for PyTorch updates
+- **Memory Usage:** Requires 8GB+ RAM (16GB+ recommended for batch processing optimization)
+- **Model Size:** First run downloads ~500MB of models to `~/.cache/huggingface/`
+- **Audio Quality:** Transcription accuracy depends on audio quality and clarity
+
+**Recommended for:** Videos up to 2-3 hours on CPU, unlimited with a supported GPU
+
 ## How It Works
 
 1. **Audio Download:** Downloads audio from YouTube using `yt-dlp`
@@ -47,8 +59,8 @@ Before installing, ensure you have:
 #### 3. Clone and Install Dependencies
 
 ```cmd
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/FaizHLI/transcriber.git
+cd transcriber
 pip install -r requirements.txt
 ```
 
@@ -73,8 +85,8 @@ brew install python@3.12 ffmpeg git
 #### 3. Clone and Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/FaizHLI/transcriber.git
+cd transcriber
 pip3 install -r requirements.txt
 ```
 
@@ -86,8 +98,8 @@ MPS is enabled by default on Apple Silicon Macs. No additional installation need
 
 ```bash
 sudo apt-get install python3.12 ffmpeg git
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/FaizHLI/transcriber.git
+cd transcriber
 pip install -r requirements.txt
 ```
 
@@ -132,7 +144,7 @@ streamlit run app.py
 
 ## Performance Notes
 
-- **CUDA (Nvidia GPU):** Fastest processing (~1-2 minutes for 1 hour video)
+- **CUDA (Nvidia GPU):** Fastest processing (~1-2 minutes for 1 hour video) -- torch needs updates for 50 series GPUs
 - **MPS (Apple Silicon):** Fast processing (~2-3 minutes for 1 hour video)
 - **CPU:** Slower (~10-15 minutes for 1 hour video)
 
