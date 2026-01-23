@@ -5,8 +5,8 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 ## Features
 
 - **Automatic Transcription:** Uses OpenAI's Whisper model for accurate speech-to-text conversion
-- **Speaker Detection:** Identifies different speakers and labels them in the transcript
 - **GPU Acceleration:** Automatically detects and uses CUDA (Nvidia) when available
+- **Performance Timing:** Prints transcription duration to the terminal for benchmarking
 - **Interactive Navigation:** Click any timestamp to jump the video to that exact point
 - **Multiple Input Methods:** Process from YouTube URLs or upload local MP3 files
 - **Two-step Alignment:** Uses WhisperX's alignment model for precise timestamps
@@ -29,8 +29,7 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 1. **Audio Download:** Downloads audio from YouTube using `yt-dlp`
 2. **Transcription:** Whisper model converts audio to text with word-level timestamps
 3. **Alignment:** WhisperX aligns transcription with original audio for accuracy
-4. **Speaker Detection:** Identifies different speakers in multi-speaker audio
-5. **Interactive UI:** Streamlit renders an interactive transcript with clickable timestamps
+4. **Interactive UI:** Streamlit renders an interactive transcript with clickable timestamps
 
 ## Prerequisites
 

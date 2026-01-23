@@ -4,8 +4,22 @@ import streamlit as st
 import warnings
 import torch
 import whisperx
-from urllib.parse import urlparse, parse_qs
+import platform
+from urllib.parse import urlparse
 import re
+import time
+
+# Check if we're on Apple Silicon Mac
+IS_APPLE_SILICON = platform.machine() == "arm64" and platform.system() == "Darwin"
+
+# Try to import MLX Whisper (only available on Mac)
+MLX_AVAILABLE = False
+if IS_APPLE_SILICON:
+    try:
+        import mlx_whisper
+        MLX_AVAILABLE = True
+    except ImportError:
+        MLX_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
 original_load = torch.load
@@ -25,9 +39,17 @@ st.markdown("""
         justify-content: center;
     }
     .youtube-embed {
-        aspect-ratio: 9 / 16;
+        position: relative;
         width: 100%;
-        max-width: 350px;
+        max-width: 560px;
+        padding-bottom: 56.25%; /* 16:9 aspect ratio */
+    }
+    .youtube-embed iframe {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -50,117 +72,273 @@ def embed_youtube(url, start_time=0, autoplay=False):
     if video_id:
         autoplay_param = 1 if autoplay else 0
         embed_url = f"https://www.youtube.com/embed/{video_id}?start={int(start_time)}&autoplay={autoplay_param}"
-        st.markdown(f'<div class="youtube-embed"><iframe width="100%" height="100%" src="{embed_url}" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen style="position: absolute; top: 0; left: 0;"></iframe></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="youtube-embed"><iframe src="{embed_url}" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>', unsafe_allow_html=True)
     else:
         st.error("Could not extract YouTube video ID")
 
-def download_audio(url):
+def download_audio(url, progress_bar=None, status_text=None):
     try:
         urlparse(url)
     except Exception:
         raise ValueError("Invalid URL format")
     
+    # DELETE OLD AUDIO FILE FIRST
+    if os.path.exists(AUDIO_FILE):
+        os.remove(AUDIO_FILE)
+    
+    if status_text:
+        status_text.text("📥 Downloading audio from YouTube...")
+    if progress_bar:
+        progress_bar.progress(0.1)
+    
     result = subprocess.run([
         "yt-dlp", "-x", "--audio-format", "mp3",
         "--audio-quality", "9",
+        "--force-overwrites",
         "-o", AUDIO_FILE, url
     ], capture_output=True, text=True, shell=False)
     
     if result.returncode != 0:
         st.error(f"yt-dlp failed: {result.stderr}")
         raise Exception(f"Download failed: {result.stderr}")
-
-def transcribe():
-    # Device detection with debug info
-    print("=" * 50)
-    print("DEVICE DETECTION:")
-    print(f"CUDA available: {torch.cuda.is_available()}")
-    print(f"MPS available: {torch.backends.mps.is_available()}")
-    print(f"MPS built: {torch.backends.mps.is_built()}")
     
-    # WhisperX/faster-whisper doesn't support MPS yet, only CUDA and CPU
+    if not os.path.exists(AUDIO_FILE):
+        raise Exception("Audio file was not created")
+    
+    if status_text:
+        status_text.text("✅ Audio downloaded successfully")
+    if progress_bar:
+        progress_bar.progress(0.2)
+
+def transcribe_whisperx(model_name="small", batch_size=24, progress_bar=None, status_text=None):
+    """Transcribe using WhisperX"""
+    if status_text:
+        status_text.text("🔍 Detecting device...")
+    if progress_bar:
+        progress_bar.progress(0.25)
+    
     if torch.cuda.is_available():
         device = "cuda"
         compute_type = "float16"
     else:
         device = "cpu"
         compute_type = "int8"
-        print("Note: WhisperX doesn't support MPS (Apple Silicon GPU) yet.")
-        print("Using CPU instead. For GPU acceleration, faster-whisper needs CUDA.")
     
-    print(f"Selected device: {device}")
-    print(f"Compute type: {compute_type}")
+    if status_text:
+        status_text.text(f"📦 Loading WhisperX model '{model_name}'...")
+    if progress_bar:
+        progress_bar.progress(0.3)
     
-    try:
-        model = whisperx.load_model("small", device, compute_type=compute_type)
-        print(f"Model loaded successfully on device: {device}")
-        print("=" * 50)
-    except Exception as e:
-        print(f"Failed to load on {device}: {e}")
-        device = "cpu"
-        compute_type = "int8"
-        model = whisperx.load_model("small", device, compute_type=compute_type)
-        print(f"Model loaded on fallback device: {device}")
-        print("=" * 50)
+    model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    
+    if status_text:
+        status_text.text("🎤 Transcribing audio...")
+    if progress_bar:
+        progress_bar.progress(0.4)
     
     audio = whisperx.load_audio(AUDIO_FILE)
-    result = model.transcribe(audio, batch_size=24, language="en")
+    result = model.transcribe(audio, batch_size=batch_size, language="en")
+    
+    if status_text:
+        status_text.text("🔗 Aligning transcription...")
+    if progress_bar:
+        progress_bar.progress(0.7)
     
     model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
     result = whisperx.align(result["segments"], model_a, metadata, audio, device)
     
+    if status_text:
+        status_text.text("✅ Transcription complete!")
+    if progress_bar:
+        progress_bar.progress(1.0)
+    
     return result.get("segments", [])
 
+def transcribe_mlx(model_name="small", progress_bar=None, status_text=None):
+    """Transcribe using MLX Whisper (Apple Silicon)"""
+    if status_text:
+        status_text.text("🔍 Using MLX Whisper (Apple Silicon GPU)...")
+    if progress_bar:
+        progress_bar.progress(0.25)
+    
+    mlx_model_name = f"mlx-community/whisper-{model_name}-mlx"
+    
+    if status_text:
+        status_text.text("📦 Loading MLX model...")
+    if progress_bar:
+        progress_bar.progress(0.3)
+    
+    if status_text:
+        status_text.text("🎤 Transcribing with GPU acceleration...")
+    if progress_bar:
+        progress_bar.progress(0.4)
+    
+    try:
+        result = mlx_whisper.transcribe(AUDIO_FILE, path_or_hf_repo=mlx_model_name)
+    except:
+        result = mlx_whisper.transcribe(AUDIO_FILE)
+    
+    if status_text:
+        status_text.text("✅ Transcription complete!")
+    if progress_bar:
+        progress_bar.progress(1.0)
+    
+    # Convert to pure Python types to avoid MLX array issues with Streamlit
+    segments = result.get("segments", [])
+    clean_segments = []
+    for seg in segments:
+        clean_seg = {
+            "start": float(seg.get("start", 0)),
+            "end": float(seg.get("end", 0)),
+            "text": str(seg.get("text", ""))
+        }
+        clean_segments.append(clean_seg)
+    
+    return clean_segments
+
+# ============ SIDEBAR ============
 st.sidebar.title("Settings")
 input_method = st.sidebar.radio("Input Method", ["YouTube URL", "Upload MP3"])
 
+model_name = st.sidebar.selectbox(
+    "Model Size",
+    ["tiny", "base", "small", "medium", "large"],
+    index=2,
+    help="Larger models are more accurate but slower"
+)
+
+# MLX Whisper option (only on Apple Silicon)
+use_mlx = False
+if IS_APPLE_SILICON:
+    if MLX_AVAILABLE:
+        use_mlx = st.sidebar.checkbox(
+            "Use MLX Whisper (Apple Silicon GPU)",
+            value=False,
+            help="Use MLX for GPU acceleration on Apple Silicon"
+        )
+    else:
+        st.sidebar.info("Install mlx-whisper for GPU acceleration: `pip install mlx-whisper`")
+
+# Advanced settings (only for WhisperX)
+with st.sidebar.expander("Advanced Settings"):
+    if use_mlx:
+        st.info("Batch size not applicable for MLX Whisper")
+        batch_size = 24
+    else:
+        batch_size = st.slider("Batch Size", 1, 64, 24, help="Higher = faster but more memory")
+
+# ============ PROCESSING ============
 if input_method == "YouTube URL":
     url = st.sidebar.text_input("YouTube URL")
     delete_after = st.sidebar.checkbox("Delete audio after processing", value=False)
     
     if st.sidebar.button("Process Video"):
         if url:
-            with st.spinner("Processing..."):
-                download_audio(url)
-                segments = transcribe()
+            st.session_state.pop("segments", None)
+            st.session_state.pop("url", None)
+            st.session_state.pop("time", None)
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                download_audio(url, progress_bar, status_text)
+                
+                transcribe_start = time.time()
+                if use_mlx and MLX_AVAILABLE:
+                    segments = transcribe_mlx(model_name, progress_bar, status_text)
+                else:
+                    segments = transcribe_whisperx(model_name, batch_size, progress_bar, status_text)
+                transcribe_elapsed = time.time() - transcribe_start
+                print(f"Transcription completed in {transcribe_elapsed:.2f} seconds")
+                
                 if delete_after and os.path.exists(AUDIO_FILE):
                     os.remove(AUDIO_FILE)
+                
                 st.session_state["segments"] = segments
                 st.session_state["url"] = url
                 st.session_state["time"] = 0
-            st.success("Done!")
+                
+                time.sleep(0.5)
+                progress_bar.empty()
+                status_text.empty()
+                st.success("Done!")
+                st.rerun()
+                
+            except Exception as e:
+                progress_bar.empty()
+                status_text.empty()
+                st.error(f"Error: {str(e)}")
 else:
     uploaded_file = st.sidebar.file_uploader("Upload MP3", type=["mp3"])
     url_for_video = st.sidebar.text_input("YouTube URL (for video player)")
     
     if st.sidebar.button("Process Audio"):
         if uploaded_file:
-            with st.spinner("Processing..."):
+            st.session_state.pop("segments", None)
+            st.session_state.pop("url", None)
+            st.session_state.pop("time", None)
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                status_text.text("💾 Saving audio file...")
+                progress_bar.progress(0.05)
+                
+                if os.path.exists(AUDIO_FILE):
+                    os.remove(AUDIO_FILE)
+                
                 with open(AUDIO_FILE, "wb") as f:
                     f.write(uploaded_file.getbuffer())
-                segments = transcribe()
+                
+                transcribe_start = time.time()
+                if use_mlx and MLX_AVAILABLE:
+                    segments = transcribe_mlx(model_name, progress_bar, status_text)
+                else:
+                    segments = transcribe_whisperx(model_name, batch_size, progress_bar, status_text)
+                transcribe_elapsed = time.time() - transcribe_start
+                print(f"Transcription completed in {transcribe_elapsed:.2f} seconds")
+                
                 st.session_state["segments"] = segments
                 st.session_state["url"] = url_for_video if url_for_video else None
                 st.session_state["time"] = 0
-            st.success("Done!")
+                
+                time.sleep(0.5)
+                progress_bar.empty()
+                status_text.empty()
+                st.success("Done!")
+                st.rerun()
+                
+            except Exception as e:
+                progress_bar.empty()
+                status_text.empty()
+                st.error(f"Error: {str(e)}")
 
+# ============ DISPLAY ============
 st.title("Interactive Transcript")
 
-if "segments" in st.session_state:
+if "segments" in st.session_state and st.session_state["segments"]:
+    if st.button("🗑️ Clear Transcript"):
+        st.session_state.pop("segments", None)
+        st.session_state.pop("url", None)
+        st.session_state.pop("time", None)
+        st.rerun()
+    
     st.markdown('<div class="sticky-video-wrapper">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.session_state.get("url"):
             should_autoplay = st.session_state.get("autoplay", False)
             embed_youtube(st.session_state["url"], st.session_state.get("time", 0), autoplay=should_autoplay)
+            st.session_state["autoplay"] = False
         else:
             st.info("No video URL provided - audio only mode")
     st.markdown('</div>', unsafe_allow_html=True)
-
+    
     st.subheader("Transcript")
     with st.container(height=500):
         for i, seg in enumerate(st.session_state["segments"]):
-            speaker = seg.get("speaker", f"Speaker {i%3+1}")
             text = seg.get("text", "").strip()
             start = seg.get("start", 0)
             
@@ -174,6 +352,6 @@ if "segments" in st.session_state:
                     st.session_state["autoplay"] = True
                     st.rerun()
             with cols[1]:
-                st.write(f"**{speaker}:** {text}")
+                st.write(text)
 else:
     st.info("👈 Choose input method and click Process to get started")
