@@ -1,0 +1,7 @@
+whisperx
+mlx-whisper
+yt-dlp
+streamlit
+librosa
+soundfile
+torch
