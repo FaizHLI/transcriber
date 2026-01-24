@@ -57,9 +57,15 @@ st.markdown("""
 AUDIO_FILE = "temp_audio.mp3"
 
 def get_youtube_id(url):
+    """Extract YouTube video ID from various URL formats"""
     patterns = [
-        r'youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})',
-        r'youtu\.be/([a-zA-Z0-9_-]{11})',
+        r'(?:youtube\.com|m\.youtube\.com)/watch\?v=([a-zA-Z0-9_-]{11})',  # Standard watch URL
+        r'(?:youtube\.com|m\.youtube\.com)/watch\?.*[&?]v=([a-zA-Z0-9_-]{11})',  # v= with other params
+        r'youtu\.be/([a-zA-Z0-9_-]{11})',  # Shortened youtu.be
+        r'(?:youtube\.com|m\.youtube\.com)/embed/([a-zA-Z0-9_-]{11})',  # Embed URL
+        r'(?:youtube\.com|m\.youtube\.com)/v/([a-zA-Z0-9_-]{11})',  # /v/ format
+        r'(?:youtube\.com|m\.youtube\.com)/shorts/([a-zA-Z0-9_-]{11})',  # YouTube Shorts
+        r'(?:youtube\.com|m\.youtube\.com)/live/([a-zA-Z0-9_-]{11})',  # YouTube Live
     ]
     for pattern in patterns:
         match = re.search(pattern, url)
@@ -74,7 +80,7 @@ def embed_youtube(url, start_time=0, autoplay=False):
         embed_url = f"https://www.youtube.com/embed/{video_id}?start={int(start_time)}&autoplay={autoplay_param}"
         st.markdown(f'<div class="youtube-embed"><iframe src="{embed_url}" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>', unsafe_allow_html=True)
     else:
-        st.error("Could not extract YouTube video ID")
+        st.error(f"Could not extract YouTube video ID from URL: {url[:50]}... Please check the URL format.")
 
 def download_audio(url, progress_bar=None, status_text=None):
     try:
@@ -203,8 +209,8 @@ input_method = st.sidebar.radio("Input Method", ["YouTube URL", "Upload MP3"])
 model_name = st.sidebar.selectbox(
     "Model Size",
     ["tiny", "base", "small", "medium", "large"],
-    index=2,
-    help="Larger models are more accurate but slower"
+    index=1,
+    help="Larger models are more accurate but slower. 'base' is recommended for speed."
 )
 
 # MLX Whisper option (only on Apple Silicon)
@@ -212,10 +218,12 @@ use_mlx = False
 if IS_APPLE_SILICON:
     if MLX_AVAILABLE:
         use_mlx = st.sidebar.checkbox(
-            "Use MLX Whisper (Apple Silicon GPU)",
-            value=False,
-            help="Use MLX for GPU acceleration on Apple Silicon"
+            "🚀 Use MLX Whisper (Apple Silicon GPU - FASTER)",
+            value=True,
+            help="Use MLX for GPU acceleration on Apple Silicon. MUCH faster than CPU!"
         )
+        if use_mlx:
+            st.sidebar.info("⚡ MLX enabled: ~3-5x faster transcription!")
     else:
         st.sidebar.info("Install mlx-whisper for GPU acceleration: `pip install mlx-whisper`")
 
@@ -225,7 +233,7 @@ with st.sidebar.expander("Advanced Settings"):
         st.info("Batch size not applicable for MLX Whisper")
         batch_size = 24
     else:
-        batch_size = st.slider("Batch Size", 1, 64, 24, help="Higher = faster but more memory")
+        batch_size = st.slider("Batch Size", 1, 128, 48, help="Higher = faster but more memory. 48-96 recommended.")
 
 # ============ PROCESSING ============
 if input_method == "YouTube URL":
@@ -315,6 +323,68 @@ else:
                 status_text.empty()
                 st.error(f"Error: {str(e)}")
 
+def create_flexible_pattern(keyword):
+    """
+    Create a regex pattern that handles:
+    - Plurals and possessives (s, s', 's)
+    - Compound words (hyphenated or adjacent: "fire truck" matches "firetruck")
+    - But excludes closed compounds (searching "fire" won't match "firetruck")
+    - Ordinal forms for numbers
+    - Multi-word phrases with flexible spacing
+    """
+    # Remove leading/trailing whitespace
+    keyword = keyword.strip()
+    
+    # Split into words to handle multi-word keywords
+    words = keyword.split()
+    
+    if len(words) == 1:
+        # Single word - handle plurals, possessives, and compounds
+        word = re.escape(words[0])
+        
+        # Check if it ends with a number (for ordinal forms like "January 6")
+        has_number = bool(re.search(r'\d$', words[0]))
+        
+        if has_number:
+            # Allow ordinal suffixes (st, nd, rd, th)
+            # Capture the prefix (space/hyphen) in group 0, word in group 1
+            pattern = rf'(^|\s|-)({word}(?:st|nd|rd|th)?)(?=\s|[.,!?;:\-]|$|\'s|\')'
+        else:
+            # Allow plurals (s, es) and possessives ('s, s', ')
+            # Allow hyphenated compounds (pro-Palestine)
+            # Exclude closed compounds: require word boundary or hyphen/space before and after
+            # Capture the prefix (space/hyphen) in group 1, word in group 2
+            pattern = rf'(^|\s|-)({word}(?:es|s)?(?:\'s|s\'|\')?)(?=\s|[.,!?;:\-]|$)'
+    else:
+        # Multi-word keyword - handle spacing variations and plurals on each word
+        word_patterns = []
+        for i, word in enumerate(words):
+            escaped_word = re.escape(word)
+            
+            # Check if this word ends with a number (for ordinal forms)
+            has_number = bool(re.search(r'\d$', word))
+            
+            # Last word gets special handling
+            if i == len(words) - 1:
+                if has_number:
+                    # Add ordinal suffix support
+                    word_patterns.append(rf'{escaped_word}(?:st|nd|rd|th)?')
+                else:
+                    # Add plural/possessive support
+                    word_patterns.append(rf'{escaped_word}(?:es|s)?(?:\'s|s\'|\')?')
+            else:
+                # Middle words can have plurals (e.g., "Laws and order")
+                word_patterns.append(rf'{escaped_word}(?:s)?')
+        
+        # Join with flexible spacing:
+        # - Allow spaces, hyphens, or NO space (for compound matching)
+        # - "fire truck" search will match "fire truck", "fire-truck", or "firetruck"
+        inner_pattern = r'[\s\-]?'.join(word_patterns)
+        # Capture the prefix (space/hyphen) in group 1, word phrase in group 2
+        pattern = rf'(^|\s|-)({inner_pattern})(?=\s|[.,!?;:]|$|\'s|\')'
+    
+    return re.compile(pattern, re.IGNORECASE)
+
 def search_keywords_in_segments(segments, keywords):
     """Search for keywords in transcript segments and return matches with context"""
     results = {}
@@ -325,8 +395,9 @@ def search_keywords_in_segments(segments, keywords):
             continue
             
         matches = []
-        # Create regex pattern for case-insensitive word boundary matching
-        pattern = re.compile(r'\b' + re.escape(keyword_clean) + r'\b', re.IGNORECASE)
+        
+        # Create flexible pattern for this keyword
+        pattern = create_flexible_pattern(keyword_clean)
         
         for i, seg in enumerate(segments):
             text = seg.get("text", "").strip()
@@ -366,14 +437,37 @@ if "segments" in st.session_state and st.session_state["segments"]:
     # ============ KEYWORD SEARCH ============
     st.subheader("🔍 Keyword Search")
     
+    with st.expander("ℹ️ How keyword matching works", expanded=False):
+        st.markdown("""
+        **✅ MATCHES:**
+        - Plurals & possessives: `Immigrant` → Immigrants, Immigrant's
+        - Compound words: `fire truck` → fire truck, firetruck
+        - Hyphenated: `Palestine` → pro-Palestine, Palestine-Israel
+        - Ordinals: `January 6` → January 6th
+        - Context: `Elon` → Elon University, Elon Musk
+        
+        **❌ DOES NOT MATCH:**
+        - Closed compounds: `fire` won't match firetruck (but `fire truck` will)
+        - Inflections: `Immigrant` won't match Immigration
+        - Different words: Single letter differences won't match
+        
+        **💡 TIP:** Use `/` to add spelling variations: `Zelensky / Zelenskiy / Zelenski`
+        """)
+    
     col_left, col_right = st.columns([1, 2])
     
     with col_left:
         keywords_input = st.text_area(
             "Paste keywords (one per line)",
             height=200,
-            placeholder="Adopt / Adoption\nFaith\nPro Life / Pro-Life\nUnborn\nFamily",
-            help="Enter keywords separated by newlines. Use / to separate variations (e.g., 'Pro Life / Pro-Life')"
+            placeholder="Democrat\nFaith\nPro Life\nJanuary 6\nZelensky / Zelenskiy / Zelenski\nICE\nfire truck",
+            help="""Smart matching includes:
+• Plurals & possessives (Democrat → Democrats, Democrat's, eggs')
+• Compound words (fire truck → firetruck, fire truck)
+• Hyphenated forms (Palestine → pro-Palestine, couch → couch potato)
+• Ordinals with numbers (January 6 → January 6th)
+• Use / for spelling variations (Zelensky / Zelenskiy / Zelenski)
+• Excludes: inflections (Immigrant ≠ Immigration), closed compounds (fire ≠ firetruck)"""
         )
         
         if st.button("🔎 Search Keywords", use_container_width=True):
@@ -416,9 +510,23 @@ if "segments" in st.session_state and st.session_state["segments"]:
                             secs = int(timestamp % 60)
                             text = match["text"]
                             
-                            # Highlight the keyword in the text
-                            pattern = re.compile(r'\b' + re.escape(keyword) + r'\b', re.IGNORECASE)
-                            highlighted_text = pattern.sub(f"**{keyword.upper()}**", text)
+                            # Highlight the keyword in the text using the flexible pattern
+                            pattern = create_flexible_pattern(keyword)
+                            
+                            # Find the matched text and highlight it, preserving spacing
+                            def highlight_match(match_obj):
+                                # Group 1 is the prefix (^, space, or hyphen)
+                                # Group 2 is the actual matched word
+                                prefix = match_obj.group(1)
+                                matched_text = match_obj.group(2)
+                                
+                                # If prefix is start of string (^), don't include it
+                                if prefix in ('^', ''):
+                                    prefix = ""
+                                
+                                return f"{prefix}**{matched_text.upper()}**"
+                            
+                            highlighted_text = pattern.sub(highlight_match, text)
                             
                             col_time, col_text = st.columns([0.2, 0.8])
                             with col_time:
