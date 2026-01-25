@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import warnings
 import torch
-import whisperx
+from faster_whisper import WhisperModel
 import platform
 from urllib.parse import urlparse
 import re
@@ -116,49 +116,63 @@ def download_audio(url, progress_bar=None, status_text=None):
     if progress_bar:
         progress_bar.progress(0.2)
 
-def transcribe_whisperx(model_name="small", batch_size=24, progress_bar=None, status_text=None):
-    """Transcribe using WhisperX"""
+def transcribe_faster_whisper(model_name="small", progress_bar=None, status_text=None):
+    """Transcribe using faster-whisper (better CUDA 12.0+ support)"""
     if status_text:
         status_text.text("🔍 Detecting device...")
     if progress_bar:
         progress_bar.progress(0.25)
     
+    # faster-whisper uses "cuda" or "cpu" for device
+    # For compute_type: "float16" for CUDA, "int8" for CPU
     if torch.cuda.is_available():
         device = "cuda"
         compute_type = "float16"
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"✅ Using GPU: {gpu_name} (CUDA {torch.version.cuda})")
     else:
         device = "cpu"
         compute_type = "int8"
+        print("⚠️  Using CPU (GPU not available)")
     
     if status_text:
-        status_text.text(f"📦 Loading WhisperX model '{model_name}'...")
+        status_text.text(f"📦 Loading faster-whisper model '{model_name}'...")
     if progress_bar:
         progress_bar.progress(0.3)
     
-    model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    # Initialize faster-whisper model
+    model = WhisperModel(model_name, device=device, compute_type=compute_type)
     
     if status_text:
         status_text.text("🎤 Transcribing audio...")
     if progress_bar:
         progress_bar.progress(0.4)
     
-    audio = whisperx.load_audio(AUDIO_FILE)
-    result = model.transcribe(audio, batch_size=batch_size, language="en")
+    # Transcribe with faster-whisper
+    # segments is an iterator, info contains language and other metadata
+    segments, info = model.transcribe(
+        AUDIO_FILE,
+        language="en",
+        beam_size=5,
+        vad_filter=True,  # Voice activity detection
+        vad_parameters=dict(min_silence_duration_ms=500)
+    )
     
-    if status_text:
-        status_text.text("🔗 Aligning transcription...")
-    if progress_bar:
-        progress_bar.progress(0.7)
-    
-    model_a, metadata = whisperx.load_align_model(language_code="en", device=device)
-    result = whisperx.align(result["segments"], model_a, metadata, audio, device)
+    # Convert segments iterator to list format compatible with existing code
+    result_segments = []
+    for segment in segments:
+        result_segments.append({
+            "start": segment.start,
+            "end": segment.end,
+            "text": segment.text.strip()
+        })
     
     if status_text:
         status_text.text("✅ Transcription complete!")
     if progress_bar:
         progress_bar.progress(1.0)
     
-    return result.get("segments", [])
+    return result_segments
 
 def transcribe_mlx(model_name="small", progress_bar=None, status_text=None):
     """Transcribe using MLX Whisper (Apple Silicon)"""
@@ -209,8 +223,8 @@ input_method = st.sidebar.radio("Input Method", ["YouTube URL", "Upload MP3"])
 model_name = st.sidebar.selectbox(
     "Model Size",
     ["tiny", "base", "small", "medium", "large"],
-    index=1,
-    help="Larger models are more accurate but slower. 'base' is recommended for speed."
+    index=2,
+    help="Larger models are more accurate but slower. 'small' is the default."
 )
 
 # MLX Whisper option (only on Apple Silicon)
@@ -227,13 +241,12 @@ if IS_APPLE_SILICON:
     else:
         st.sidebar.info("Install mlx-whisper for GPU acceleration: `pip install mlx-whisper`")
 
-# Advanced settings (only for WhisperX)
+# Advanced settings
 with st.sidebar.expander("Advanced Settings"):
     if use_mlx:
         st.info("Batch size not applicable for MLX Whisper")
-        batch_size = 24
     else:
-        batch_size = st.slider("Batch Size", 1, 128, 48, help="Higher = faster but more memory. 48-96 recommended.")
+        st.info("faster-whisper uses beam_size=5 by default. No batch size configuration needed.")
 
 # ============ PROCESSING ============
 if input_method == "YouTube URL":
@@ -256,7 +269,7 @@ if input_method == "YouTube URL":
                 if use_mlx and MLX_AVAILABLE:
                     segments = transcribe_mlx(model_name, progress_bar, status_text)
                 else:
-                    segments = transcribe_whisperx(model_name, batch_size, progress_bar, status_text)
+                    segments = transcribe_faster_whisper(model_name, progress_bar, status_text)
                 transcribe_elapsed = time.time() - transcribe_start
                 print(f"Transcription completed in {transcribe_elapsed:.2f} seconds")
                 
@@ -304,7 +317,7 @@ else:
                 if use_mlx and MLX_AVAILABLE:
                     segments = transcribe_mlx(model_name, progress_bar, status_text)
                 else:
-                    segments = transcribe_whisperx(model_name, batch_size, progress_bar, status_text)
+                    segments = transcribe_faster_whisper(model_name, progress_bar, status_text)
                 transcribe_elapsed = time.time() - transcribe_start
                 print(f"Transcription completed in {transcribe_elapsed:.2f} seconds")
                 

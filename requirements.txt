@@ -1,4 +1,4 @@
-whisperx
+faster-whisper
 mlx-whisper
 yt-dlp
 streamlit

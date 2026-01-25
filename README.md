@@ -5,30 +5,31 @@ A Streamlit-based application that automatically transcribes YouTube videos into
 ## Features
 
 - **Automatic Transcription:** Uses OpenAI's Whisper model for accurate speech-to-text conversion
-- **GPU Acceleration:** Automatically detects and uses CUDA (Nvidia) when available
-- **Performance Timing:** Prints transcription duration to the terminal for benchmarking
+- **GPU Acceleration:** Automatically detects and uses CUDA (Nvidia) when available, with full CUDA 12.0+ support
+- **Apple Silicon Support:** MLX Whisper for native GPU acceleration on M1/M2/M3 Macs (~3-5x faster than CPU)
+- **Performance Timing:** Prints transcription duration and device info (GPU/CPU) to the terminal for benchmarking
 - **Interactive Navigation:** Click any timestamp to jump the video to that exact point
 - **Multiple Input Methods:** Process from YouTube URLs or upload local MP3 files
-- **Two-step Alignment:** Uses WhisperX's alignment model for precise timestamps
+- **Voice Activity Detection:** Built-in VAD for better transcription quality
 
 ## Limitations
 
 ⚠️ **Important:** This application runs entirely on your local machine without cloud services.
 
 - **CPU Processing:** Without a GPU, transcription is slow (~10-15 minutes per hour of video)
-- **GPU Support:** GPU acceleration requires a compatible Nvidia GPU with CUDA. RTX 50-series GPUs require waiting for PyTorch updates
-- **Apple Silicon (M1/M2/M3):** MPS (Metal Performance Shaders) is not yet supported by WhisperX's backend (faster-whisper/CTranslate2). Use MLX model for faster processing on Mac.
-- **Memory Usage:** Requires 8GB+ RAM (16GB+ recommended for batch processing optimization)
-- **Model Size:** First run downloads ~500MB of models to `~/.cache/huggingface/`
+- **GPU Support:** GPU acceleration requires a compatible Nvidia GPU with CUDA. Full CUDA 12.0+ support via faster-whisper
+- **Apple Silicon (M1/M2/M3):** Use MLX Whisper option for native GPU acceleration (~3-5x faster than CPU). MLX is automatically enabled if available.
+- **Memory Usage:** Requires 8GB+ RAM (16GB+ recommended)
+- **Model Size:** First run downloads ~500MB-1GB of models to `~/.cache/huggingface/`
 - **Audio Quality:** Transcription accuracy depends on audio quality and clarity
 
-**Recommended for:** Videos up to 2-3 hours on CPU, unlimited with a supported Nvidia GPU
+**Recommended for:** Videos up to 2-3 hours on CPU, unlimited with a supported Nvidia GPU or Apple Silicon Mac
 
 ## How It Works
 
 1. **Audio Download:** Downloads audio from YouTube using `yt-dlp`
-2. **Transcription:** Whisper model converts audio to text with word-level timestamps
-3. **Alignment:** WhisperX aligns transcription with original audio for accuracy
+2. **Transcription:** faster-whisper (or MLX on Apple Silicon) converts audio to text with segment-level timestamps
+3. **Voice Activity Detection:** Built-in VAD filters out silence for better accuracy
 4. **Interactive UI:** Streamlit renders an interactive transcript with clickable timestamps
 
 ## Prerequisites
@@ -92,7 +93,7 @@ pip3 install -r requirements.txt
 
 **Note about Apple Silicon (M1/M2/M3):**
 
-Currently, WhisperX uses faster-whisper as its backend, which doesn't support MPS (Metal Performance Shaders) yet. Your Mac will automatically fall back to CPU processing. MPS support is being developed by the faster-whisper/CTranslate2 teams, but is not available at this time.
+The app automatically detects Apple Silicon and offers MLX Whisper for native GPU acceleration. MLX provides ~3-5x faster transcription than CPU. If `mlx-whisper` is installed, you'll see a checkbox to enable it in the sidebar. Install with: `pip install mlx-whisper`
 
 ### Linux (Ubuntu/Debian)
 
@@ -144,26 +145,24 @@ streamlit run app.py
 
 ## Performance Notes
 
-- **CUDA (Nvidia GPU):** Fastest processing (~1-2 minutes for 1 hour video) -- torch needs updates for RTX 50-series GPUs
-- **CPU (Intel/AMD/Apple Silicon):** Slower (~10-15 minutes for 1 hour video)
+- **CUDA (Nvidia GPU):** Fastest processing (~3-4 minutes for 1 hour video with "small" model). Full CUDA 12.0+ support via faster-whisper
+- **MLX (Apple Silicon GPU):** Native GPU acceleration (~3-5x faster than CPU, ~6-8 minutes for 1 hour video)
+- **CPU (Intel/AMD/Apple Silicon without MLX):** Slower (~10-15 minutes for 1 hour video)
 
-The app automatically detects and uses the best available device. Apple Silicon Macs will use CPU until MPS support is added to faster-whisper.
+The app automatically detects and uses the best available device. On startup, it prints to the terminal whether GPU or CPU is being used.
 
 ## Performance Tuning
 
-You can optimize performance by adjusting the batch size in `app.py`:
+faster-whisper automatically optimizes batch processing internally. You can adjust performance by:
 
-**Line 91:** `result = model.transcribe(audio, batch_size=96, language="en")`
+- **Model Size:** Smaller models (tiny, base) are faster but less accurate. "small" is the default balance
+- **Compute Type:** Automatically set (float16 for GPU, int8 for CPU)
+- **VAD Filter:** Enabled by default for better accuracy (can be disabled in code if needed)
 
-- **Higher batch size (128, 256):** Faster processing but uses more RAM
-- **Default, Lower batch size (32, 48):** Slower but more memory-efficient
-- **(96):** Optimized for 32GB+ RAM systems
-
-**Recommendations:**
-- **32GB+ RAM:** `batch_size=96-128` (recommended default)
-- **16GB RAM:** `batch_size=64`
-- **8GB RAM:** `batch_size=32-48`
-- **M1 MacBook Pro (8GB unified memory):** `batch_size=16-32` max
+**Model Recommendations:**
+- **Speed priority:** Use "tiny" or "base" models
+- **Accuracy priority:** Use "medium" or "large" models
+- **Balanced (default):** "small" model
 
 ---
 
@@ -174,10 +173,11 @@ You can optimize performance by adjusting the batch size in `app.py`:
 | "Python not found" | Reinstall Python and check "Add Python.exe to PATH" |
 | "FFmpeg not found" | Restart your computer after installing FFmpeg |
 | YouTube download fails | Update yt-dlp: `pip install -U yt-dlp` |
-| Out of memory | Reduce batch size in `app.py` or close other applications |
+| Out of memory | Close other applications or use a smaller model (tiny/base) |
 | Models won't download | Check internet connection. Models cache at `~/.cache/huggingface/` |
-| Slow transcription | Increase batch size in `app.py` if you have RAM available |
-| "unsupported device mps" | This is expected. WhisperX doesn't support MPS yet. App will use CPU automatically |
+| Slow transcription | Use GPU if available, or enable MLX on Apple Silicon Macs |
+| "module 'torchaudio' has no attribute 'AudioMetaData'" | This shouldn't occur with faster-whisper. If it does, reinstall: `pip install --upgrade faster-whisper` |
+| GPU not detected | Check CUDA installation. The app will print device info on startup |
 
 ---
 
@@ -195,8 +195,10 @@ You can optimize performance by adjusting the batch size in `app.py`:
 
 All dependencies are automatically installed via `pip install -r requirements.txt`:
 
-- **whisperx:** Speech-to-text transcription with alignment
+- **faster-whisper:** Fast Whisper implementation with CUDA 12.0+ support (CTranslate2 backend)
+- **mlx-whisper:** (Optional) Apple Silicon GPU acceleration for M1/M2/M3 Macs
 - **yt-dlp:** YouTube audio downloader
 - **streamlit:** Web application framework
+- **torch:** PyTorch for device detection (CUDA support)
 
 PyTorch and other required packages are automatically resolved by pip.
