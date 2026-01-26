@@ -82,6 +82,39 @@ def embed_youtube(url, start_time=0, autoplay=False):
     else:
         st.error(f"Could not extract YouTube video ID from URL: {url[:50]}... Please check the URL format.")
 
+def extract_audio_from_video(video_path, progress_bar=None, status_text=None):
+    """Extract audio from video file (MP4, etc.) using ffmpeg"""
+    # DELETE OLD AUDIO FILE FIRST
+    if os.path.exists(AUDIO_FILE):
+        os.remove(AUDIO_FILE)
+    
+    if status_text:
+        status_text.text("🎬 Extracting audio from video...")
+    if progress_bar:
+        progress_bar.progress(0.1)
+    
+    result = subprocess.run([
+        "ffmpeg", "-i", video_path,
+        "-vn",  # No video
+        "-acodec", "libmp3lame",  # MP3 codec
+        "-ab", "192k",  # Audio bitrate
+        "-ar", "44100",  # Sample rate
+        "-y",  # Overwrite output file
+        AUDIO_FILE
+    ], capture_output=True, text=True, shell=False)
+    
+    if result.returncode != 0:
+        st.error(f"ffmpeg failed: {result.stderr}")
+        raise Exception(f"Audio extraction failed: {result.stderr}")
+    
+    if not os.path.exists(AUDIO_FILE):
+        raise Exception("Audio file was not created")
+    
+    if status_text:
+        status_text.text("✅ Audio extracted successfully")
+    if progress_bar:
+        progress_bar.progress(0.2)
+
 def download_audio(url, progress_bar=None, status_text=None):
     try:
         urlparse(url)
@@ -204,7 +237,7 @@ def transcribe_mlx(model_name="small", progress_bar=None, status_text=None):
 
 # ============ SIDEBAR ============
 st.sidebar.title("Settings")
-input_method = st.sidebar.radio("Input Method", ["YouTube URL", "Upload MP3"])
+input_method = st.sidebar.radio("Input Method", ["YouTube URL", "Upload Audio/Video"])
 
 model_name = st.sidebar.selectbox(
     "Model Size",
@@ -278,7 +311,7 @@ if input_method == "YouTube URL":
                 status_text.empty()
                 st.error(f"Error: {str(e)}")
 else:
-    uploaded_file = st.sidebar.file_uploader("Upload MP3", type=["mp3"])
+    uploaded_file = st.sidebar.file_uploader("Upload Audio/Video", type=["mp3", "mp4", "m4a", "wav", "flac", "ogg"])
     url_for_video = st.sidebar.text_input("YouTube URL (for video player)")
     
     if st.sidebar.button("Process Audio"):
@@ -291,14 +324,51 @@ else:
             status_text = st.empty()
             
             try:
-                status_text.text("💾 Saving audio file...")
-                progress_bar.progress(0.05)
+                # Get file extension
+                file_extension = uploaded_file.name.split('.')[-1].lower() if uploaded_file.name else ""
+                is_video = file_extension in ["mp4", "m4v", "mov", "avi", "mkv", "webm"]
                 
-                if os.path.exists(AUDIO_FILE):
-                    os.remove(AUDIO_FILE)
-                
-                with open(AUDIO_FILE, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
+                if is_video:
+                    # For video files, save to temp file and extract audio
+                    status_text.text("💾 Saving video file...")
+                    progress_bar.progress(0.05)
+                    
+                    temp_video_file = f"temp_video.{file_extension}"
+                    if os.path.exists(temp_video_file):
+                        os.remove(temp_video_file)
+                    
+                    with open(temp_video_file, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    # Extract audio from video
+                    extract_audio_from_video(temp_video_file, progress_bar, status_text)
+                    
+                    # Clean up temp video file
+                    if os.path.exists(temp_video_file):
+                        os.remove(temp_video_file)
+                else:
+                    # For audio files, save directly
+                    status_text.text("💾 Saving audio file...")
+                    progress_bar.progress(0.05)
+                    
+                    if os.path.exists(AUDIO_FILE):
+                        os.remove(AUDIO_FILE)
+                    
+                    # If it's already MP3, save directly
+                    if file_extension == "mp3":
+                        with open(AUDIO_FILE, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                    else:
+                        # For other audio formats, convert to MP3 using ffmpeg
+                        temp_audio_file = f"temp_audio.{file_extension}"
+                        with open(temp_audio_file, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        
+                        extract_audio_from_video(temp_audio_file, progress_bar, status_text)
+                        
+                        # Clean up temp audio file
+                        if os.path.exists(temp_audio_file):
+                            os.remove(temp_audio_file)
                 
                 transcribe_start = time.time()
                 if use_mlx and MLX_AVAILABLE:
