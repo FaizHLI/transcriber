@@ -316,6 +316,14 @@ else:
     
     if st.sidebar.button("Process Audio"):
         if uploaded_file:
+            # Clear previous state and delete any old uploaded video file
+            old_video = st.session_state.pop("video_path", None)
+            st.session_state.pop("video_format", None)
+            if old_video and os.path.exists(old_video):
+                try:
+                    os.remove(old_video)
+                except OSError:
+                    pass
             st.session_state.pop("segments", None)
             st.session_state.pop("url", None)
             st.session_state.pop("time", None)
@@ -343,9 +351,11 @@ else:
                     # Extract audio from video
                     extract_audio_from_video(temp_video_file, progress_bar, status_text)
                     
-                    # Clean up temp video file
-                    if os.path.exists(temp_video_file):
-                        os.remove(temp_video_file)
+                    # Keep video file for playback; store path and format in session state
+                    st.session_state["video_path"] = os.path.abspath(temp_video_file)
+                    fmt_map = {"mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime",
+                               "avi": "video/x-msvideo", "mkv": "video/x-matroska", "webm": "video/webm"}
+                    st.session_state["video_format"] = fmt_map.get(file_extension, "video/mp4")
                 else:
                     # For audio files, save directly
                     status_text.text("💾 Saving audio file...")
@@ -379,7 +389,11 @@ else:
                 print(f"Transcription completed in {transcribe_elapsed:.2f} seconds")
                 
                 st.session_state["segments"] = segments
-                st.session_state["url"] = url_for_video if url_for_video else None
+                # Only use YouTube URL when we don't have an uploaded video (audio-only mode)
+                if "video_path" not in st.session_state:
+                    st.session_state["url"] = url_for_video if url_for_video else None
+                else:
+                    st.session_state["url"] = None
                 st.session_state["time"] = 0
                 
                 time.sleep(0.5)
@@ -488,6 +502,13 @@ st.title("Interactive Transcript")
 
 if "segments" in st.session_state and st.session_state["segments"]:
     if st.button("🗑️ Clear Transcript"):
+        video_path = st.session_state.pop("video_path", None)
+        st.session_state.pop("video_format", None)
+        if video_path and os.path.exists(video_path):
+            try:
+                os.remove(video_path)
+            except OSError:
+                pass
         st.session_state.pop("segments", None)
         st.session_state.pop("url", None)
         st.session_state.pop("time", None)
@@ -496,7 +517,14 @@ if "segments" in st.session_state and st.session_state["segments"]:
     st.markdown('<div class="sticky-video-wrapper">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.session_state.get("url"):
+        video_path = st.session_state.get("video_path")
+        if video_path and os.path.exists(video_path):
+            start_time = st.session_state.get("time", 0)
+            video_format = st.session_state.get("video_format", "video/mp4")
+            st.video(video_path, format=video_format, start_time=start_time)
+            if st.session_state.get("autoplay"):
+                st.session_state["autoplay"] = False
+        elif st.session_state.get("url"):
             should_autoplay = st.session_state.get("autoplay", False)
             embed_youtube(st.session_state["url"], st.session_state.get("time", 0), autoplay=should_autoplay)
             st.session_state["autoplay"] = False
