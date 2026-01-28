@@ -242,8 +242,8 @@ input_method = st.sidebar.radio("Input Method", ["YouTube URL", "Upload Audio/Vi
 model_name = st.sidebar.selectbox(
     "Model Size",
     ["tiny", "base", "small", "medium", "large"],
-    index=1,
-    help="Larger models are more accurate but slower. 'base' is recommended for speed."
+    index=2,
+    help="Larger models are more accurate but slower"
 )
 
 # MLX Whisper option (only on Apple Silicon)
